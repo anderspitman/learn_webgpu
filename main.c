@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+#include <time.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -7,7 +9,14 @@
 #define CHECK(success) if (!success) { fprintf(stderr, "Failed on line %d\n", __LINE__); exit(1); }
 #define CHECK_MSG(ptr, msg) if (!ptr) fprintf(stderr, msg); exit(1)
 
-void onAdapterRequestEnded(
+void sleep_ms(uint64_t ms) {
+    struct timespec ts;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (ms % 1000) * 1000000L;
+    nanosleep(&ts, NULL);
+}
+
+void on_adapter_request_ended(
     WGPURequestAdapterStatus status,
     WGPUAdapter adapter,
     WGPUStringView message,
@@ -19,13 +28,24 @@ void onAdapterRequestEnded(
 }
 
 void on_device_request_end(
-        WGPURequestDeviceStatus status,
-        WGPUDevice device,
-        WGPUStringView message,
-        void *userdata1,
-        void *userdata2
+    WGPURequestDeviceStatus status,
+    WGPUDevice device,
+    WGPUStringView message,
+    void *userdata1,
+    void *userdata2
 ) {
     *(WGPUDevice*)userdata1 = device;
+}
+
+void on_queue_work_done(
+    WGPUQueueWorkDoneStatus status,
+    WGPUStringView message,
+    void *userdata1,
+    void *userdata2
+) {
+    CHECK(status == WGPUQueueWorkDoneStatus_Success);
+    bool *work_done = (bool*)userdata1;
+    *work_done = true;
 }
 
 WGPUAdapter get_adapter(WGPUInstance instance) {
@@ -33,7 +53,7 @@ WGPUAdapter get_adapter(WGPUInstance instance) {
     WGPUAdapter adapter;
 
     WGPURequestAdapterCallbackInfo cbInfo = {
-        .callback = onAdapterRequestEnded,
+        .callback = on_adapter_request_ended,
         .userdata1 = &adapterReady,
         .userdata2 = &adapter
     };
@@ -43,6 +63,11 @@ WGPUAdapter get_adapter(WGPUInstance instance) {
     };
 
     wgpuInstanceRequestAdapter(instance, &adapterOptions, cbInfo);
+
+    while (!adapterReady) {
+        wgpuInstanceProcessEvents(instance);
+        sleep_ms(100);
+    }
 
     CHECK(adapterReady);
 
@@ -63,6 +88,22 @@ WGPUDevice get_device(WGPUAdapter adapter) {
     return device;
 }
 
+void wait_queue_work_done(WGPUInstance instance, WGPUQueue queue) {
+    bool work_done = false;
+
+    WGPUQueueWorkDoneCallbackInfo cbInfo = WGPU_QUEUE_WORK_DONE_CALLBACK_INFO_INIT;
+    cbInfo.mode = WGPUCallbackMode_AllowProcessEvents;
+    cbInfo.callback = on_queue_work_done;
+    cbInfo.userdata1 = &work_done;
+
+    wgpuQueueOnSubmittedWorkDone(queue, cbInfo);
+
+    while (!work_done) {
+        wgpuInstanceProcessEvents(instance);
+        sleep_ms(200);
+    }
+}
+
 int main(int argc, char **argv) {
 
     WGPUInstanceDescriptor desc = {
@@ -80,7 +121,28 @@ int main(int argc, char **argv) {
     printf("Device: %.*s\n", adapter_info.device.length, adapter_info.device.data);
 
     WGPUDevice device = get_device(adapter);
+    CHECK(device);
+
     wgpuAdapterRelease(adapter);
+
+    WGPUQueue queue = wgpuDeviceGetQueue(device);
+    CHECK(queue);
+
+    WGPUCommandEncoderDescriptor enc_desc = WGPU_COMMAND_ENCODER_DESCRIPTOR_INIT;
+    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, &enc_desc);
+    CHECK(encoder);
+
+    WGPUCommandBufferDescriptor cmd_buf_desc = WGPU_COMMAND_BUFFER_DESCRIPTOR_INIT;
+    WGPUCommandBuffer cmd_buf = wgpuCommandEncoderFinish(encoder, &cmd_buf_desc);
+    CHECK(cmd_buf);
+    wgpuCommandEncoderRelease(encoder);
+
+    printf("Submit command\n");
+    wgpuQueueSubmit(queue, 1, &cmd_buf);
+    wgpuCommandBufferRelease(cmd_buf);
+    printf("Command submitted\n");
+
+    wait_queue_work_done(instance, queue);
 
     //glfwInit();
 
@@ -92,6 +154,7 @@ int main(int argc, char **argv) {
     //    glfwPollEvents();
     //}
 
+    wgpuQueueRelease(queue);
     wgpuDeviceRelease(device);
     wgpuInstanceRelease(instance);
 
