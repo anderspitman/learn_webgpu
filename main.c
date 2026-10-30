@@ -6,8 +6,16 @@
 #include <webgpu/webgpu.h>
 #include <GLFW/glfw3.h>
 
+
 #define CHECK(success) if (!success) { fprintf(stderr, "Failed on line %d\n", __LINE__); exit(1); }
 #define CHECK_MSG(ptr, msg) if (!ptr) fprintf(stderr, msg); exit(1)
+
+
+typedef struct {
+    bool operation_ended;
+    bool mapping_successful;
+} BufferMapContext;
+
 
 void sleep_ms(uint64_t ms) {
     struct timespec ts;
@@ -88,6 +96,18 @@ WGPUDevice get_device(WGPUAdapter adapter) {
     return device;
 }
 
+void wait(WGPUInstance instance, bool *done) {
+    while (!(*done)) {
+        wgpuInstanceProcessEvents(instance);
+        if (*done) {
+            break;
+        }
+        else {
+            sleep_ms(200);
+        }
+    }
+}
+
 void wait_queue_work_done(WGPUInstance instance, WGPUQueue queue) {
     bool work_done = false;
 
@@ -98,10 +118,38 @@ void wait_queue_work_done(WGPUInstance instance, WGPUQueue queue) {
 
     wgpuQueueOnSubmittedWorkDone(queue, cbInfo);
 
-    while (!work_done) {
-        wgpuInstanceProcessEvents(instance);
-        sleep_ms(200);
-    }
+    wait(instance, &work_done);
+}
+
+void buf_map_callback(
+    WGPUMapAsyncStatus status,
+    WGPUStringView message,
+    void *userdata1,
+    void *userdata2
+) {
+    BufferMapContext *ctx = (BufferMapContext*)userdata1;
+
+    ctx->operation_ended = true;
+    
+    CHECK(status == WGPUMapAsyncStatus_Success);
+    ctx->mapping_successful = true;
+}
+
+void read_buf(WGPUInstance instance, WGPUBuffer buf) {
+    WGPUBufferMapCallbackInfo buf_cb_info = WGPU_BUFFER_MAP_CALLBACK_INFO_INIT;
+
+    BufferMapContext ctx;
+
+    buf_cb_info.mode = WGPUCallbackMode_AllowProcessEvents;
+    buf_cb_info.callback = buf_map_callback;
+    buf_cb_info.userdata1 = &ctx;
+
+    // TODO: WGPU_WHOLE_MAP_SIZE doesn't work as of writing this code:
+    // see https://github.com/gfx-rs/wgpu-native/issues/601
+    //wgpuBufferMapAsync(buf, WGPUMapMode_Read, 0, WGPU_WHOLE_MAP_SIZE, buf_cb_info);
+    wgpuBufferMapAsync(buf, WGPUMapMode_Read, 0, wgpuBufferGetSize(buf), buf_cb_info);
+
+    wait(instance, &ctx.operation_ended);
 }
 
 int main(int argc, char **argv) {
@@ -125,12 +173,34 @@ int main(int argc, char **argv) {
 
     wgpuAdapterRelease(adapter);
 
+    WGPUBufferDescriptor buf_desc_a = WGPU_BUFFER_DESCRIPTOR_INIT;
+    buf_desc_a.size = 256;
+    buf_desc_a.usage = WGPUBufferUsage_MapWrite | WGPUBufferUsage_CopySrc;
+    buf_desc_a.mappedAtCreation = true;
+    WGPUBuffer buf_a = wgpuDeviceCreateBuffer(device, &buf_desc_a);
+
+    WGPUBufferDescriptor buf_desc_b = WGPU_BUFFER_DESCRIPTOR_INIT;
+    buf_desc_b.size = 32;
+    buf_desc_b.usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst;
+    WGPUBuffer buf_b = wgpuDeviceCreateBuffer(device, &buf_desc_b);
+
+    uint8_t *buf_data_a = (uint8_t *)wgpuBufferGetMappedRange(buf_a, 0, WGPU_WHOLE_MAP_SIZE);
+    CHECK(buf_data_a);
+
+    for (size_t i = 0; i < 256; ++i) {
+        buf_data_a[i] = i;
+    }
+
+    wgpuBufferUnmap(buf_a);
+
     WGPUQueue queue = wgpuDeviceGetQueue(device);
     CHECK(queue);
 
     WGPUCommandEncoderDescriptor enc_desc = WGPU_COMMAND_ENCODER_DESCRIPTOR_INIT;
     WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, &enc_desc);
     CHECK(encoder);
+
+    wgpuCommandEncoderCopyBufferToBuffer(encoder, buf_a, 16, buf_b, 0, buf_desc_b.size);
 
     WGPUCommandBufferDescriptor cmd_buf_desc = WGPU_COMMAND_BUFFER_DESCRIPTOR_INIT;
     WGPUCommandBuffer cmd_buf = wgpuCommandEncoderFinish(encoder, &cmd_buf_desc);
@@ -142,7 +212,24 @@ int main(int argc, char **argv) {
     wgpuCommandBufferRelease(cmd_buf);
     printf("Command submitted\n");
 
-    wait_queue_work_done(instance, queue);
+
+    read_buf(instance, buf_b);
+
+    const uint8_t *buf_data_b = wgpuBufferGetConstMappedRange(buf_b, 0, WGPU_WHOLE_MAP_SIZE);
+    CHECK(buf_data_b);
+
+    printf("buf b data: [ ");
+    for (size_t i = 0; i < buf_desc_b.size; ++i) {
+        printf("%d ", buf_data_b[i]);
+    }
+    printf("]\n");
+
+    wgpuBufferUnmap(buf_b);
+
+    sleep_ms(10000);
+
+
+    //wait_queue_work_done(instance, queue);
 
     //glfwInit();
 
@@ -154,6 +241,8 @@ int main(int argc, char **argv) {
     //    glfwPollEvents();
     //}
 
+    wgpuBufferRelease(buf_a);
+    wgpuBufferRelease(buf_b);
     wgpuQueueRelease(queue);
     wgpuDeviceRelease(device);
     wgpuInstanceRelease(instance);
