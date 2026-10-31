@@ -8,5 +8,7 @@ gcc \
     -L ./wgpu/lib/ \
     -I ./wgpu/include/ \
     -Wl,-rpath,'$ORIGIN/wgpu/lib' \
+    -g \
+    -O0 \
     -o main \
     main.c
