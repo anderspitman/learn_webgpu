@@ -24,6 +24,18 @@ void sleep_ms(uint64_t ms) {
     nanosleep(&ts, NULL);
 }
 
+void instance_wait_on(WGPUInstance instance, bool *done) {
+    while (!(*done)) {
+        wgpuInstanceProcessEvents(instance);
+        if (*done) {
+            break;
+        }
+        else {
+            sleep_ms(200);
+        }
+    }
+}
+
 void on_adapter_request_ended(
     WGPURequestAdapterStatus status,
     WGPUAdapter adapter,
@@ -72,12 +84,7 @@ WGPUAdapter get_adapter(WGPUInstance instance) {
 
     wgpuInstanceRequestAdapter(instance, &adapterOptions, cbInfo);
 
-    while (!adapterReady) {
-        wgpuInstanceProcessEvents(instance);
-        sleep_ms(100);
-    }
-
-    CHECK(adapterReady);
+    instance_wait_on(instance, &adapterReady);
 
     return adapter;
 }
@@ -96,18 +103,6 @@ WGPUDevice get_device(WGPUAdapter adapter) {
     return device;
 }
 
-void wait(WGPUInstance instance, bool *done) {
-    while (!(*done)) {
-        wgpuInstanceProcessEvents(instance);
-        if (*done) {
-            break;
-        }
-        else {
-            sleep_ms(200);
-        }
-    }
-}
-
 void wait_queue_work_done(WGPUInstance instance, WGPUQueue queue) {
     bool work_done = false;
 
@@ -118,7 +113,7 @@ void wait_queue_work_done(WGPUInstance instance, WGPUQueue queue) {
 
     wgpuQueueOnSubmittedWorkDone(queue, cbInfo);
 
-    wait(instance, &work_done);
+    instance_wait_on(instance, &work_done);
 }
 
 void buf_map_callback(
@@ -149,7 +144,7 @@ void read_buf(WGPUInstance instance, WGPUBuffer buf) {
     //wgpuBufferMapAsync(buf, WGPUMapMode_Read, 0, WGPU_WHOLE_MAP_SIZE, buf_cb_info);
     wgpuBufferMapAsync(buf, WGPUMapMode_Read, 0, wgpuBufferGetSize(buf), buf_cb_info);
 
-    wait(instance, &ctx.operation_ended);
+    instance_wait_on(instance, &ctx.operation_ended);
 }
 
 int main(int argc, char **argv) {
@@ -225,8 +220,6 @@ int main(int argc, char **argv) {
     printf("]\n");
 
     wgpuBufferUnmap(buf_b);
-
-    sleep_ms(10000);
 
 
     //wait_queue_work_done(instance, queue);
