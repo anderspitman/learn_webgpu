@@ -5,7 +5,11 @@
 #include <stdbool.h>
 #include <string.h>
 #include <webgpu/webgpu.h>
+#define GLFW_INCLUDE_NONE
+#define GLFW_EXPOSE_NATIVE_X11
+#define GLFW_EXPOSE_NATIVE_WAYLAND
 #include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
 
 
 #define CHECK(success) if (!success) { fprintf(stderr, "Failed on line %d\n", __LINE__); exit(1); }
@@ -151,6 +155,32 @@ void map_buf_sync(WGPUInstance instance, WGPUBuffer buf) {
     instance_wait_on(instance, &ctx.operation_ended);
 }
 
+WGPUSurface create_surface(WGPUInstance instance, GLFWwindow *window) {
+
+    WGPUSurfaceDescriptor surface_desc = WGPU_SURFACE_DESCRIPTOR_INIT;
+
+    switch (glfwGetPlatform()) {
+        case GLFW_PLATFORM_X11: {
+            printf("X11\n");
+
+            WGPUSurfaceSourceXlibWindow source = WGPU_SURFACE_SOURCE_XLIB_WINDOW_INIT;
+            source.chain.sType = WGPUSType_SurfaceSourceXlibWindow;
+            source.display = glfwGetX11Display();
+            source.window = glfwGetX11Window(window);
+
+            surface_desc.nextInChain = &source.chain;
+
+            return wgpuInstanceCreateSurface(instance, &surface_desc);
+
+            break;
+        }
+        case GLFW_PLATFORM_WAYLAND: {
+            printf("Wayland\n");
+            break;
+        }
+    }
+}
+
 
 const char *shader_source =
     "@group(0) @binding(0)\n"
@@ -170,6 +200,16 @@ int main(int argc, char **argv) {
 
     WGPUInstance instance = wgpuCreateInstance(&instance_desc);
     CHECK(instance);
+
+    CHECK(glfwInit());
+
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+
+    GLFWwindow *window = glfwCreateWindow(640, 480, "Learn WebGPU", NULL, NULL);
+    CHECK(window);
+
+    WGPUSurface surface = create_surface(instance, window);
+
     
     WGPUAdapter adapter = get_adapter(instance);
 
@@ -185,6 +225,7 @@ int main(int argc, char **argv) {
 
 
     WGPUQueue queue = wgpuDeviceGetQueue(device);
+
 
     size_t element_count = 64;
 
@@ -290,16 +331,10 @@ int main(int argc, char **argv) {
     wgpuBufferUnmap(staging_buf);
 
 
-    CHECK(glfwInit());
-
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-
-    GLFWwindow *window = glfwCreateWindow(640, 480, "Learn WebGPU", NULL, NULL);
-    CHECK(window);
-
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
     }
+ 
 
     glfwDestroyWindow(window);
     glfwTerminate();

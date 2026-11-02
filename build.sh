@@ -11,3 +11,5 @@ gcc \
     -O0 \
     -o main \
     main.c
+
+echo Build done
