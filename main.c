@@ -165,16 +165,15 @@ const char *shader_source =
 
 int main(int argc, char **argv) {
 
-    WGPUInstanceDescriptor desc = {
-        .nextInChain = NULL
-    };
+    WGPUInstanceDescriptor instance_desc = WGPU_INSTANCE_DESCRIPTOR_INIT;
+    instance_desc.nextInChain = NULL;
 
-    WGPUInstance instance = wgpuCreateInstance(&desc);
+    WGPUInstance instance = wgpuCreateInstance(&instance_desc);
     CHECK(instance);
     
     WGPUAdapter adapter = get_adapter(instance);
 
-    WGPUAdapterInfo adapter_info = {0};
+    WGPUAdapterInfo adapter_info = WGPU_ADAPTER_INFO_INIT;
     wgpuAdapterGetInfo(adapter, &adapter_info);
 
     printf("Device: %.*s\n", adapter_info.device.length, adapter_info.device.data);
@@ -252,11 +251,10 @@ int main(int argc, char **argv) {
     wgpuBindGroupLayoutRelease(bind_group_desc.layout);
 
 
-    WGPUCommandEncoderDescriptor enc_desc2 = WGPU_COMMAND_ENCODER_DESCRIPTOR_INIT;
-    WGPUCommandEncoder encoder2 = wgpuDeviceCreateCommandEncoder(device, &enc_desc2);
+    WGPUCommandEncoderDescriptor enc_desc = WGPU_COMMAND_ENCODER_DESCRIPTOR_INIT;
+    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, &enc_desc);
 
-    WGPUComputePassEncoder compute_pass = wgpuCommandEncoderBeginComputePass(encoder2, NULL);
-
+    WGPUComputePassEncoder compute_pass = wgpuCommandEncoderBeginComputePass(encoder, NULL);
 
     wgpuComputePassEncoderSetPipeline(compute_pass, pipeline);
     wgpuComputePassEncoderSetBindGroup(compute_pass, 0, bind_group, 0, NULL);
@@ -268,15 +266,16 @@ int main(int argc, char **argv) {
     wgpuComputePassEncoderEnd(compute_pass);
     wgpuComputePassEncoderRelease(compute_pass);
 
-    wgpuCommandEncoderCopyBufferToBuffer(encoder2, out_buf, 0, staging_buf, 0, staging_buf_desc.size);
 
-    WGPUCommandBufferDescriptor cmd_buf_desc2 = WGPU_COMMAND_BUFFER_DESCRIPTOR_INIT;
-    WGPUCommandBuffer cmd_buf2 = wgpuCommandEncoderFinish(encoder2, &cmd_buf_desc2);
+    wgpuCommandEncoderCopyBufferToBuffer(encoder, out_buf, 0, staging_buf, 0, staging_buf_desc.size);
 
-    wgpuQueueSubmit(queue, 1, &cmd_buf2);
-    wgpuCommandBufferRelease(cmd_buf2);
+    WGPUCommandBufferDescriptor cmd_buf_desc = WGPU_COMMAND_BUFFER_DESCRIPTOR_INIT;
+    WGPUCommandBuffer cmd_buf = wgpuCommandEncoderFinish(encoder, &cmd_buf_desc);
 
-    wgpuCommandEncoderRelease(encoder2);
+    wgpuQueueSubmit(queue, 1, &cmd_buf);
+    wgpuCommandBufferRelease(cmd_buf);
+
+    wgpuCommandEncoderRelease(encoder);
 
     map_buf_sync(instance, staging_buf);
 
