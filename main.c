@@ -86,7 +86,7 @@ void on_queue_work_done(
     *work_done = true;
 }
 
-WGPUAdapter get_adapter(WGPUInstance instance) {
+WGPUAdapter get_adapter(WGPUInstance instance, WGPURequestAdapterOptions adapter_options) {
     bool adapterReady = false;
     WGPUAdapter adapter = NULL;
 
@@ -95,9 +95,6 @@ WGPUAdapter get_adapter(WGPUInstance instance) {
     cb_info.callback = on_adapter_request_ended;
     cb_info.userdata1 = &adapterReady;
     cb_info.userdata2 = &adapter;
-
-    WGPURequestAdapterOptions adapter_options = WGPU_REQUEST_ADAPTER_OPTIONS_INIT;
-    adapter_options.powerPreference = WGPUPowerPreference_Undefined;
 
     wgpuInstanceRequestAdapter(instance, &adapter_options, cb_info);
 
@@ -210,8 +207,12 @@ int main(int argc, char **argv) {
 
     WGPUSurface surface = create_surface(instance, window);
 
-    
-    WGPUAdapter adapter = get_adapter(instance);
+
+    WGPURequestAdapterOptions adapter_options = WGPU_REQUEST_ADAPTER_OPTIONS_INIT;
+    adapter_options.powerPreference = WGPUPowerPreference_HighPerformance;
+    adapter_options.compatibleSurface = surface;
+
+    WGPUAdapter adapter = get_adapter(instance, adapter_options);
 
     WGPUAdapterInfo adapter_info = WGPU_ADAPTER_INFO_INIT;
     wgpuAdapterGetInfo(adapter, &adapter_info);
@@ -338,6 +339,8 @@ int main(int argc, char **argv) {
 
     glfwDestroyWindow(window);
     glfwTerminate();
+
+    wgpuSurfaceRelease(surface);
 
     wgpuBufferRelease(in_buf);
     wgpuBufferRelease(out_buf);
