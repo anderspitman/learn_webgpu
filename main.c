@@ -9,7 +9,6 @@
 
 
 #define CHECK(success) if (!success) { fprintf(stderr, "Failed on line %d\n", __LINE__); exit(1); }
-#define CHECK_MSG(ptr, msg) if (!ptr) fprintf(stderr, msg); exit(1)
 
 
 typedef struct {
@@ -55,6 +54,7 @@ void on_adapter_request_ended(
     void *userdata1,
     void *userdata2
 ) {
+    CHECK(status == WGPURequestAdapterStatus_Success);
     *(bool*)userdata1 = true;
     *(WGPUAdapter*)userdata2 = adapter;
 }
@@ -66,6 +66,7 @@ void on_device_request_end(
     void *userdata1,
     void *userdata2
 ) {
+    CHECK(status == WGPURequestDeviceStatus_Success);
     *(WGPUDevice*)userdata1 = device;
     *(bool*)userdata2 = true;
 }
@@ -83,19 +84,18 @@ void on_queue_work_done(
 
 WGPUAdapter get_adapter(WGPUInstance instance) {
     bool adapterReady = false;
-    WGPUAdapter adapter;
+    WGPUAdapter adapter = NULL;
 
-    WGPURequestAdapterCallbackInfo cbInfo = {
-        .callback = on_adapter_request_ended,
-        .userdata1 = &adapterReady,
-        .userdata2 = &adapter
-    };
+    WGPURequestAdapterCallbackInfo cb_info = WGPU_REQUEST_ADAPTER_CALLBACK_INFO_INIT;
+    cb_info.mode = WGPUCallbackMode_AllowProcessEvents;
+    cb_info.callback = on_adapter_request_ended;
+    cb_info.userdata1 = &adapterReady;
+    cb_info.userdata2 = &adapter;
 
-    WGPURequestAdapterOptions adapterOptions = {
-       .powerPreference = WGPUPowerPreference_Undefined
-    };
+    WGPURequestAdapterOptions adapter_options = WGPU_REQUEST_ADAPTER_OPTIONS_INIT;
+    adapter_options.powerPreference = WGPUPowerPreference_Undefined;
 
-    wgpuInstanceRequestAdapter(instance, &adapterOptions, cbInfo);
+    wgpuInstanceRequestAdapter(instance, &adapter_options, cb_info);
 
     instance_wait_on(instance, &adapterReady);
 
@@ -104,16 +104,16 @@ WGPUAdapter get_adapter(WGPUInstance instance) {
 
 WGPUDevice get_device(WGPUInstance instance, WGPUAdapter adapter) {
 
-    WGPUDevice device;
+    WGPUDevice device = NULL;
     bool device_ready = false;
 
-    WGPURequestDeviceCallbackInfo cbInfo = {
-        .callback = on_device_request_end,
-        .userdata1 = &device,
-        .userdata2 = &device_ready,
-    };
+    WGPURequestDeviceCallbackInfo cb_info = WGPU_REQUEST_DEVICE_CALLBACK_INFO_INIT;
+    cb_info.mode = WGPUCallbackMode_AllowProcessEvents;
+    cb_info.callback = on_device_request_end;
+    cb_info.userdata1 = &device;
+    cb_info.userdata2 = &device_ready;
 
-    wgpuAdapterRequestDevice(adapter, NULL, cbInfo);
+    wgpuAdapterRequestDevice(adapter, NULL, cb_info);
 
     instance_wait_on(instance, &device_ready);
 
@@ -306,6 +306,7 @@ int main(int argc, char **argv) {
     wgpuBufferRelease(staging_buf);
 
     wgpuComputePipelineRelease(pipeline);
+    wgpuBindGroupRelease(bind_group);
     wgpuQueueRelease(queue);
     wgpuDeviceRelease(device);
     wgpuInstanceRelease(instance);
