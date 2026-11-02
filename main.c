@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <string.h>
 #include <webgpu/webgpu.h>
 #include <GLFW/glfw3.h>
 
@@ -22,6 +23,17 @@ void sleep_ms(uint64_t ms) {
     ts.tv_sec = ms / 1000;
     ts.tv_nsec = (ms % 1000) * 1000000L;
     nanosleep(&ts, NULL);
+}
+
+uint32_t divide_and_ceil(uint32_t a, uint32_t b) {
+    return (a + b - 1) / b;
+}
+
+WGPUStringView to_wgpu_string_view(const char *c_str) {
+    return (WGPUStringView) {
+        .data = c_str,
+        .length = strlen(c_str),
+    };
 }
 
 void instance_wait_on(WGPUInstance instance, bool *done) {
@@ -55,6 +67,7 @@ void on_device_request_end(
     void *userdata2
 ) {
     *(WGPUDevice*)userdata1 = device;
+    *(bool*)userdata2 = true;
 }
 
 void on_queue_work_done(
@@ -89,16 +102,20 @@ WGPUAdapter get_adapter(WGPUInstance instance) {
     return adapter;
 }
 
-WGPUDevice get_device(WGPUAdapter adapter) {
+WGPUDevice get_device(WGPUInstance instance, WGPUAdapter adapter) {
 
     WGPUDevice device;
+    bool device_ready = false;
 
     WGPURequestDeviceCallbackInfo cbInfo = {
         .callback = on_device_request_end,
         .userdata1 = &device,
+        .userdata2 = &device_ready,
     };
 
     wgpuAdapterRequestDevice(adapter, NULL, cbInfo);
+
+    instance_wait_on(instance, &device_ready);
 
     return device;
 }
@@ -130,10 +147,10 @@ void buf_map_callback(
     ctx->mapping_successful = true;
 }
 
-void read_buf(WGPUInstance instance, WGPUBuffer buf) {
+void map_buf_sync(WGPUInstance instance, WGPUBuffer buf) {
     WGPUBufferMapCallbackInfo buf_cb_info = WGPU_BUFFER_MAP_CALLBACK_INFO_INIT;
 
-    BufferMapContext ctx;
+    BufferMapContext ctx = {0};
 
     buf_cb_info.mode = WGPUCallbackMode_AllowProcessEvents;
     buf_cb_info.callback = buf_map_callback;
@@ -146,6 +163,18 @@ void read_buf(WGPUInstance instance, WGPUBuffer buf) {
 
     instance_wait_on(instance, &ctx.operation_ended);
 }
+
+
+const char *shader_source =
+    "@group(0) @binding(0)\n"
+    "var<storage,read> input_buffer: array<f32>;\n"
+    "@group(0) @binding(1)\n"
+    "var<storage,read_write> output_buffer: array<f32>;\n"
+    "@compute @workgroup_size(32)\n"
+    "fn compute_stuff(@builtin(global_invocation_id) thread_id: vec3u) {\n"
+    "    output_buffer[thread_id.x] = 2.0 * input_buffer[thread_id.x];\n"
+    "}\n"
+    ;
 
 int main(int argc, char **argv) {
 
@@ -163,10 +192,127 @@ int main(int argc, char **argv) {
 
     printf("Device: %.*s\n", adapter_info.device.length, adapter_info.device.data);
 
-    WGPUDevice device = get_device(adapter);
+    WGPUDevice device = get_device(instance, adapter);
     CHECK(device);
 
     wgpuAdapterRelease(adapter);
+
+
+
+
+
+    WGPUQueue queue2 = wgpuDeviceGetQueue(device);
+
+    size_t element_count = 64;
+
+    WGPUBufferDescriptor in_buf_desc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    in_buf_desc.label = to_wgpu_string_view("Input buffer");
+    in_buf_desc.size = element_count * sizeof(float);
+    in_buf_desc.usage = WGPUBufferUsage_Storage;
+    in_buf_desc.mappedAtCreation = true;
+    WGPUBuffer in_buf = wgpuDeviceCreateBuffer(device, &in_buf_desc);
+
+    WGPUBufferDescriptor out_buf_desc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    out_buf_desc.label = to_wgpu_string_view("Output buffer");
+    out_buf_desc.size = element_count * sizeof(float);
+    out_buf_desc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc;
+    WGPUBuffer out_buf = wgpuDeviceCreateBuffer(device, &out_buf_desc);
+
+    WGPUBufferDescriptor staging_buf_desc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    staging_buf_desc.label = to_wgpu_string_view("Staging buffer");
+    staging_buf_desc.size = element_count * sizeof(float);
+    staging_buf_desc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
+    WGPUBuffer staging_buf = wgpuDeviceCreateBuffer(device, &staging_buf_desc);
+
+
+    float *in_buf_data = (float*)wgpuBufferGetMappedRange(in_buf, 0, WGPU_WHOLE_MAP_SIZE);
+    for (size_t i = 0; i < element_count; ++i) {
+        in_buf_data[i] = (float)i * 0.1f;
+    }
+    wgpuBufferUnmap(in_buf);
+
+
+    WGPUShaderSourceWGSL wgsl_source_desc = WGPU_SHADER_SOURCE_WGSL_INIT;
+    wgsl_source_desc.code = to_wgpu_string_view(shader_source);
+
+    WGPUShaderModuleDescriptor module_desc = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
+    module_desc.nextInChain = &wgsl_source_desc.chain;
+    module_desc.label = to_wgpu_string_view("Our first compute shader");
+
+    WGPUShaderModule shader_module = wgpuDeviceCreateShaderModule(device, &module_desc);
+
+    WGPUComputePipelineDescriptor pipeline_desc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
+    pipeline_desc.compute.module = shader_module;
+    pipeline_desc.compute.entryPoint = to_wgpu_string_view("compute_stuff");
+    WGPUComputePipeline pipeline = wgpuDeviceCreateComputePipeline(device, &pipeline_desc);
+    wgpuShaderModuleRelease(shader_module);
+
+
+    WGPUBindGroupEntry bind_group_entries[2] = {
+        WGPU_BIND_GROUP_ENTRY_INIT,
+        WGPU_BIND_GROUP_ENTRY_INIT
+    };
+
+    bind_group_entries[0].binding = 0;
+    bind_group_entries[0].buffer = in_buf;
+    bind_group_entries[1].binding = 1;
+    bind_group_entries[1].buffer = out_buf;
+
+    WGPUBindGroupDescriptor bind_group_desc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+    bind_group_desc.entries = bind_group_entries;
+    bind_group_desc.entryCount = 2;
+    bind_group_desc.layout = wgpuComputePipelineGetBindGroupLayout(pipeline, 0);
+
+    WGPUBindGroup bind_group = wgpuDeviceCreateBindGroup(device, &bind_group_desc);
+
+    wgpuBindGroupLayoutRelease(bind_group_desc.layout);
+
+
+    WGPUCommandEncoderDescriptor enc_desc2 = WGPU_COMMAND_ENCODER_DESCRIPTOR_INIT;
+    WGPUCommandEncoder encoder2 = wgpuDeviceCreateCommandEncoder(device, &enc_desc2);
+
+    WGPUComputePassEncoder compute_pass = wgpuCommandEncoderBeginComputePass(encoder2, NULL);
+
+
+    wgpuComputePassEncoderSetPipeline(compute_pass, pipeline);
+    wgpuComputePassEncoderSetBindGroup(compute_pass, 0, bind_group, 0, NULL);
+
+    uint32_t workgroup_size_x = 32;
+    uint32_t workgroup_count_x = divide_and_ceil(element_count, workgroup_size_x);
+
+    wgpuComputePassEncoderDispatchWorkgroups(compute_pass, workgroup_count_x, 1, 1);
+    wgpuComputePassEncoderEnd(compute_pass);
+    wgpuComputePassEncoderRelease(compute_pass);
+
+    wgpuCommandEncoderCopyBufferToBuffer(encoder2, out_buf, 0, staging_buf, 0, staging_buf_desc.size);
+
+    WGPUCommandBufferDescriptor cmd_buf_desc2 = WGPU_COMMAND_BUFFER_DESCRIPTOR_INIT;
+    WGPUCommandBuffer cmd_buf2 = wgpuCommandEncoderFinish(encoder2, &cmd_buf_desc2);
+
+    wgpuQueueSubmit(queue2, 1, &cmd_buf2);
+    wgpuCommandBufferRelease(cmd_buf2);
+
+    wgpuCommandEncoderRelease(encoder2);
+
+    map_buf_sync(instance, staging_buf);
+
+    const float *staging_buf_data = (float*)wgpuBufferGetConstMappedRange(staging_buf, 0, WGPU_WHOLE_MAP_SIZE);
+
+    printf("staging buf data: [ ");
+    for (size_t i = 0; i < element_count; ++i) {
+        printf("%.1f ", staging_buf_data[i]);
+    }
+    printf("]\n");
+
+    wgpuBufferUnmap(staging_buf);
+
+
+
+
+
+
+
+
 
     WGPUBufferDescriptor buf_desc_a = WGPU_BUFFER_DESCRIPTOR_INIT;
     buf_desc_a.size = 256;
@@ -208,7 +354,7 @@ int main(int argc, char **argv) {
     printf("Command submitted\n");
 
 
-    read_buf(instance, buf_b);
+    map_buf_sync(instance, buf_b);
 
     const uint8_t *buf_data_b = wgpuBufferGetConstMappedRange(buf_b, 0, WGPU_WHOLE_MAP_SIZE);
     CHECK(buf_data_b);
@@ -220,6 +366,11 @@ int main(int argc, char **argv) {
     printf("]\n");
 
     wgpuBufferUnmap(buf_b);
+
+
+
+    
+
 
 
     //wait_queue_work_done(instance, queue);
@@ -234,6 +385,11 @@ int main(int argc, char **argv) {
     //    glfwPollEvents();
     //}
 
+    wgpuBufferRelease(in_buf);
+    wgpuBufferRelease(out_buf);
+    wgpuBufferRelease(staging_buf);
+
+    wgpuComputePipelineRelease(pipeline);
     wgpuBufferRelease(buf_a);
     wgpuBufferRelease(buf_b);
     wgpuQueueRelease(queue);
