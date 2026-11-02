@@ -290,15 +290,19 @@ int main(int argc, char **argv) {
     wgpuBufferUnmap(staging_buf);
 
 
-    //glfwInit();
+    CHECK(glfwInit());
 
-    //glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-    //GLFWwindow *window = glfwCreateWindow(640, 480, "test", NULL, NULL);
+    GLFWwindow *window = glfwCreateWindow(640, 480, "Learn WebGPU", NULL, NULL);
+    CHECK(window);
 
-    //while (!glfwWindowShouldClose(window)) {
-    //    glfwPollEvents();
-    //}
+    while (!glfwWindowShouldClose(window)) {
+        glfwPollEvents();
+    }
+
+    glfwDestroyWindow(window);
+    glfwTerminate();
 
     wgpuBufferRelease(in_buf);
     wgpuBufferRelease(out_buf);
