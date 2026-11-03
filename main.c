@@ -12,7 +12,7 @@
 #include <GLFW/glfw3native.h>
 
 
-#define CHECK(success) if (!success) { fprintf(stderr, "Failed on line %d\n", __LINE__); exit(1); }
+#define CHECK(success) do { if (!(success)) { fprintf(stderr, "Failed on line %d\n", __LINE__); exit(1); } } while (0)
 
 
 typedef struct {
@@ -176,8 +176,12 @@ WGPUSurface create_surface(WGPUInstance instance, GLFWwindow *window) {
             break;
         }
     }
+
+    return NULL;
 }
 
+#define WIDTH 640
+#define HEIGHT 480
 
 const char *shader_source =
     "@group(0) @binding(0)\n"
@@ -202,7 +206,7 @@ int main(int argc, char **argv) {
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-    GLFWwindow *window = glfwCreateWindow(640, 480, "Learn WebGPU", NULL, NULL);
+    GLFWwindow *window = glfwCreateWindow(WIDTH, HEIGHT, "Learn WebGPU", NULL, NULL);
     CHECK(window);
 
     WGPUSurface surface = create_surface(instance, window);
@@ -217,11 +221,25 @@ int main(int argc, char **argv) {
     WGPUAdapterInfo adapter_info = WGPU_ADAPTER_INFO_INIT;
     wgpuAdapterGetInfo(adapter, &adapter_info);
 
-    printf("Device: %.*s\n", adapter_info.device.length, adapter_info.device.data);
+    printf("Device: %.*s\n", (int)adapter_info.device.length, adapter_info.device.data);
 
     WGPUDevice device = get_device(instance, adapter);
     CHECK(device);
 
+    WGPUSurfaceCapabilities surface_caps = WGPU_SURFACE_CAPABILITIES_INIT;
+    WGPUStatus cap_status = wgpuSurfaceGetCapabilities(surface, adapter, &surface_caps);
+    CHECK(WGPUStatus_Success == cap_status);
+
+    WGPUSurfaceConfiguration surface_config = WGPU_SURFACE_CONFIGURATION_INIT;
+    surface_config.width = WIDTH;
+    surface_config.height = HEIGHT;
+    surface_config.device = device;
+    surface_config.format = surface_caps.formats[0];
+    surface_config.presentMode = WGPUPresentMode_Fifo;
+    surface_config.alphaMode = WGPUCompositeAlphaMode_Auto;
+    wgpuSurfaceConfigure(surface, &surface_config);
+
+    wgpuSurfaceCapabilitiesFreeMembers(surface_caps);
     wgpuAdapterRelease(adapter);
 
 
@@ -332,6 +350,23 @@ int main(int argc, char **argv) {
     wgpuBufferUnmap(staging_buf);
 
 
+    WGPUSurfaceTexture surface_tex = WGPU_SURFACE_TEXTURE_INIT;
+    wgpuSurfaceGetCurrentTexture(surface, &surface_tex);
+    CHECK(surface_tex.status == WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal
+          || surface_tex.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal);
+
+    WGPUTextureViewDescriptor tex_view_desc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    tex_view_desc.label = to_wgpu_string_view("Surface texture view");
+    tex_view_desc.dimension = WGPUTextureViewDimension_2D;
+
+    printf("tex: %p\n", surface_tex.texture);
+
+    WGPUTextureView tex_view = wgpuTextureCreateView(surface_tex.texture, &tex_view_desc);
+    (void)tex_view;
+
+
+
+
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
     }
@@ -340,6 +375,7 @@ int main(int argc, char **argv) {
     glfwDestroyWindow(window);
     glfwTerminate();
 
+    wgpuSurfaceUnconfigure(surface);
     wgpuSurfaceRelease(surface);
 
     wgpuBufferRelease(in_buf);
