@@ -161,7 +161,6 @@ WGPUSurface create_surface(WGPUInstance instance, GLFWwindow *window) {
             printf("X11\n");
 
             WGPUSurfaceSourceXlibWindow source = WGPU_SURFACE_SOURCE_XLIB_WINDOW_INIT;
-            source.chain.sType = WGPUSType_SurfaceSourceXlibWindow;
             source.display = glfwGetX11Display();
             source.window = glfwGetX11Window(window);
 
@@ -173,6 +172,15 @@ WGPUSurface create_surface(WGPUInstance instance, GLFWwindow *window) {
         }
         case GLFW_PLATFORM_WAYLAND: {
             printf("Wayland\n");
+
+            WGPUSurfaceSourceWaylandSurface source = WGPU_SURFACE_SOURCE_WAYLAND_SURFACE_INIT;
+            source.display = glfwGetWaylandDisplay();
+            source.surface = glfwGetWaylandWindow(window);
+
+            surface_desc.nextInChain = &source.chain;
+
+            return wgpuInstanceCreateSurface(instance, &surface_desc);
+
             break;
         }
     }
@@ -210,6 +218,7 @@ int main(int argc, char **argv) {
     CHECK(window);
 
     WGPUSurface surface = create_surface(instance, window);
+    CHECK(surface);
 
 
     WGPURequestAdapterOptions adapter_options = WGPU_REQUEST_ADAPTER_OPTIONS_INIT;
@@ -222,6 +231,8 @@ int main(int argc, char **argv) {
     wgpuAdapterGetInfo(adapter, &adapter_info);
 
     printf("Device: %.*s\n", (int)adapter_info.device.length, adapter_info.device.data);
+
+    wgpuAdapterInfoFreeMembers(adapter_info);
 
     WGPUDevice device = get_device(instance, adapter);
     CHECK(device);
@@ -350,33 +361,61 @@ int main(int argc, char **argv) {
     wgpuBufferUnmap(staging_buf);
 
 
-    WGPUSurfaceTexture surface_tex = WGPU_SURFACE_TEXTURE_INIT;
-    wgpuSurfaceGetCurrentTexture(surface, &surface_tex);
-    CHECK(surface_tex.status == WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal
-          || surface_tex.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal);
-
-    WGPUTextureViewDescriptor tex_view_desc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
-    tex_view_desc.label = to_wgpu_string_view("Surface texture view");
-    tex_view_desc.dimension = WGPUTextureViewDimension_2D;
-
-    printf("tex: %p\n", surface_tex.texture);
-
-    WGPUTextureView tex_view = wgpuTextureCreateView(surface_tex.texture, &tex_view_desc);
-    (void)tex_view;
-
-
-
+    float red = 0.0;
+    float step = 0.01;
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
+
+        WGPUSurfaceTexture surface_tex = WGPU_SURFACE_TEXTURE_INIT;
+        wgpuSurfaceGetCurrentTexture(surface, &surface_tex);
+        CHECK(surface_tex.status == WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal
+            || surface_tex.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal);
+
+        WGPUTextureViewDescriptor tex_view_desc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+        tex_view_desc.label = to_wgpu_string_view("Surface texture view");
+        tex_view_desc.dimension = WGPUTextureViewDimension_2D;
+
+        WGPUTextureView tex_view = wgpuTextureCreateView(surface_tex.texture, &tex_view_desc);
+
+        WGPURenderPassColorAttachment color_attachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+        color_attachment.view = tex_view;
+        color_attachment.loadOp = WGPULoadOp_Clear;
+        color_attachment.storeOp = WGPUStoreOp_Store;
+        red += step;
+        if (red > 1.0 || red < 0.0) {
+            step *= -1.0;
+        }
+        color_attachment.clearValue = (WGPUColor) { red, 0.0, 1.0, 1.0 };
+
+        WGPURenderPassDescriptor render_pass_desc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+        render_pass_desc.colorAttachmentCount = 1;
+        render_pass_desc.colorAttachments = &color_attachment;
+
+        WGPUCommandEncoder render_encoder = wgpuDeviceCreateCommandEncoder(device, &enc_desc);
+        WGPURenderPassEncoder render_pass = wgpuCommandEncoderBeginRenderPass(render_encoder, &render_pass_desc);
+
+        wgpuRenderPassEncoderEnd(render_pass);
+        wgpuRenderPassEncoderRelease(render_pass);
+
+        WGPUCommandBuffer render_cmd_buf = wgpuCommandEncoderFinish(render_encoder, &cmd_buf_desc);
+
+        wgpuQueueSubmit(queue, 1, &render_cmd_buf);
+
+        wgpuCommandBufferRelease(render_cmd_buf);
+        wgpuCommandEncoderRelease(render_encoder);
+
+        wgpuSurfacePresent(surface);
+
+        wgpuTextureViewRelease(tex_view);
     }
  
 
-    glfwDestroyWindow(window);
-    glfwTerminate();
-
     wgpuSurfaceUnconfigure(surface);
     wgpuSurfaceRelease(surface);
+
+    glfwDestroyWindow(window);
+    glfwTerminate();
 
     wgpuBufferRelease(in_buf);
     wgpuBufferRelease(out_buf);
