@@ -2,6 +2,8 @@
 
 set -e
 
+TARGET="${TARGET:-main}"
+
 gcc \
     -std=c99 \
     -Wall \
@@ -9,8 +11,8 @@ gcc \
     -O0 \
     -I ./wgpu/include/ \
     -I ./glfw/include/ \
-    -o main \
-    main.c \
+    -o ${TARGET} \
+    ${TARGET}.c \
     -L ./wgpu/lib/ \
     -L ./glfw/lib/ \
     -lwgpu_native \
