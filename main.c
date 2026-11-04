@@ -158,11 +158,11 @@ WGPUSurface create_surface(WGPUInstance instance, GLFWwindow *window) {
     return NULL;
 }
 
-#define WIDTH 640
-#define HEIGHT 480
-
 
 int main(int argc, char **argv) {
+
+    int width = 0;
+    int height = 0;
 
     WGPUInstanceDescriptor instance_desc = WGPU_INSTANCE_DESCRIPTOR_INIT;
     instance_desc.nextInChain = NULL;
@@ -174,8 +174,10 @@ int main(int argc, char **argv) {
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-    GLFWwindow *window = glfwCreateWindow(WIDTH, HEIGHT, "Learn WebGPU", NULL, NULL);
+    GLFWwindow *window = glfwCreateWindow(640, 480, "Learn WebGPU", NULL, NULL);
     CHECK(window);
+
+    glfwGetFramebufferSize(window, &width, &height);
 
     WGPUSurface surface = create_surface(instance, window);
     CHECK(surface);
@@ -202,8 +204,8 @@ int main(int argc, char **argv) {
     CHECK(WGPUStatus_Success == cap_status);
 
     WGPUSurfaceConfiguration surface_config = WGPU_SURFACE_CONFIGURATION_INIT;
-    surface_config.width = WIDTH;
-    surface_config.height = HEIGHT;
+    surface_config.width = width;
+    surface_config.height = height;
     surface_config.device = device;
     surface_config.format = surface_caps.formats[0];
     surface_config.presentMode = WGPUPresentMode_Fifo;
@@ -219,14 +221,36 @@ int main(int argc, char **argv) {
 
     float red = 0.0;
     float step = 0.01;
+    bool needs_reconfigure = false;
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
+        glfwGetFramebufferSize(window, &width, &height);
+
+        if (surface_config.width != width || surface_config.height != height || needs_reconfigure) {
+            needs_reconfigure = false;
+            surface_config.width = width;
+            surface_config.height = height;
+            wgpuSurfaceConfigure(surface, &surface_config);
+        }
+
         WGPUSurfaceTexture surface_tex = WGPU_SURFACE_TEXTURE_INIT;
         wgpuSurfaceGetCurrentTexture(surface, &surface_tex);
-        CHECK(surface_tex.status == WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal
-            || surface_tex.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal);
+
+        switch (surface_tex.status) {
+            case WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal:
+            case WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal:
+                break;
+            case WGPUSurfaceGetCurrentTextureStatus_Outdated:
+                needs_reconfigure = true;
+                continue;
+            case WGPUSurfaceGetCurrentTextureStatus_Timeout:
+                continue;
+            default:
+                CHECK(NULL);
+                break;
+        }
 
         WGPUTextureViewDescriptor tex_view_desc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
         tex_view_desc.label = to_wgpu_string_view("Surface texture view");
@@ -266,6 +290,7 @@ int main(int argc, char **argv) {
         wgpuSurfacePresent(surface);
 
         wgpuTextureViewRelease(tex_view);
+        wgpuTextureRelease(surface_tex.texture);
     }
  
 
