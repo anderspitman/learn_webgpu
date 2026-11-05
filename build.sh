@@ -2,7 +2,10 @@
 
 set -e
 
+CC="${CC:-gcc}"
 TARGET="${TARGET:-main}"
+
+echo Start build
 
 gcc \
     -std=c99 \

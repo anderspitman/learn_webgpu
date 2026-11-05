@@ -159,6 +159,24 @@ WGPUSurface create_surface(WGPUInstance instance, GLFWwindow *window) {
 }
 
 
+const char *shader_source =
+    "@vertex\n"
+    "fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> @builtin(position) vec4f {\n"
+    "    if (in_vertex_index == 0u) {\n"
+    "        return vec4f(-0.45, 0.5, 0.0, 1.0);\n"
+    "    } else if (in_vertex_index == 1u) {\n"
+    "        return vec4f(0.45, 0.5, 0.0, 1.0);\n"
+    "    } else {\n"
+    "        return vec4f(0.0, -0.5, 0.0, 1.0);\n"
+    "    }\n"
+    "}\n"
+    "@fragment\n"
+    "fn fs_main() -> @location(0) vec4f {\n"
+    "    return vec4f(0.0, 0.4, 0.7, 1.0);\n"
+    "}\n"
+    ;
+
+
 int main(int argc, char **argv) {
 
     int width = 0;
@@ -219,6 +237,36 @@ int main(int argc, char **argv) {
     WGPUQueue queue = wgpuDeviceGetQueue(device);
 
 
+    WGPUShaderSourceWGSL wgsl_desc = WGPU_SHADER_SOURCE_WGSL_INIT;
+    wgsl_desc.code = to_wgpu_string_view(shader_source);
+
+    WGPUShaderModuleDescriptor module_desc = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
+    module_desc.nextInChain = &wgsl_desc.chain;
+    WGPUShaderModule shader_module = wgpuDeviceCreateShaderModule(device, &module_desc);
+
+    WGPURenderPipelineDescriptor pipeline_desc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+    pipeline_desc.vertex.module = shader_module;
+    pipeline_desc.vertex.entryPoint = to_wgpu_string_view("vs_main");
+
+
+    WGPUFragmentState fragment_state = WGPU_FRAGMENT_STATE_INIT;
+    fragment_state.module = shader_module;
+    fragment_state.entryPoint = to_wgpu_string_view("fs_main");
+
+    WGPUColorTargetState color_target = WGPU_COLOR_TARGET_STATE_INIT;
+    color_target.format = surface_config.format;
+    WGPUBlendState blend_state = WGPU_BLEND_STATE_INIT;
+    color_target.blend = &blend_state;
+
+    fragment_state.targetCount = 1;
+    fragment_state.targets = &color_target;
+
+    pipeline_desc.fragment = &fragment_state;
+
+
+    WGPURenderPipeline render_pipeline = wgpuDeviceCreateRenderPipeline(device, &pipeline_desc);
+
+
     float red = 0.0;
     float step = 0.01;
     bool needs_reconfigure = false;
@@ -276,6 +324,9 @@ int main(int argc, char **argv) {
         WGPUCommandEncoder render_encoder = wgpuDeviceCreateCommandEncoder(device, &enc_desc);
         WGPURenderPassEncoder render_pass = wgpuCommandEncoderBeginRenderPass(render_encoder, &render_pass_desc);
 
+        wgpuRenderPassEncoderSetPipeline(render_pass, render_pipeline);
+        wgpuRenderPassEncoderDraw(render_pass, 3, 1, 0, 0);
+
         wgpuRenderPassEncoderEnd(render_pass);
         wgpuRenderPassEncoderRelease(render_pass);
 
@@ -300,6 +351,8 @@ int main(int argc, char **argv) {
     glfwDestroyWindow(window);
     glfwTerminate();
 
+    wgpuShaderModuleRelease(shader_module);
+    wgpuRenderPipelineRelease(render_pipeline);
     wgpuQueueRelease(queue);
     wgpuDeviceRelease(device);
     wgpuInstanceRelease(instance);
