@@ -274,6 +274,12 @@ int main(int argc, char **argv) {
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
+        GLFWgamepadstate gamepad_state = {0};
+
+        if (glfwGetGamepadState(GLFW_JOYSTICK_1, &gamepad_state)) {
+            red = gamepad_state.axes[0];
+        }
+
         glfwGetFramebufferSize(window, &width, &height);
 
         if (surface_config.width != width || surface_config.height != height || needs_reconfigure) {
