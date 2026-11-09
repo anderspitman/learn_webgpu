@@ -161,14 +161,8 @@ WGPUSurface create_surface(WGPUInstance instance, GLFWwindow *window) {
 
 const char *shader_source =
     "@vertex\n"
-    "fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> @builtin(position) vec4f {\n"
-    "    if (in_vertex_index == 0u) {\n"
-    "        return vec4f(-0.45, 0.5, 0.0, 1.0);\n"
-    "    } else if (in_vertex_index == 1u) {\n"
-    "        return vec4f(0.45, 0.5, 0.0, 1.0);\n"
-    "    } else {\n"
-    "        return vec4f(0.0, -0.5, 0.0, 1.0);\n"
-    "    }\n"
+    "fn vs_main(@location(0) in_vertex_position: vec2f) -> @builtin(position) vec4f {\n"
+    "    return vec4f(in_vertex_position, 0.0, 1.0);\n"
     "}\n"
     "@fragment\n"
     "fn fs_main() -> @location(0) vec4f {\n"
@@ -237,6 +231,34 @@ int main(int argc, char **argv) {
     WGPUQueue queue = wgpuDeviceGetQueue(device);
 
 
+    float vertex_data[] = {
+        -0.45f, 0.5f,
+        0.45f, 0.5f,
+        0.0f, -0.5f
+    };
+    const size_t vertex_data_size = sizeof(vertex_data) / sizeof(float);
+    const size_t vertex_count = vertex_data_size / 2;
+
+    WGPUBufferDescriptor vertex_buf_desc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    vertex_buf_desc.size = sizeof(vertex_data);
+    vertex_buf_desc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex;
+    WGPUBuffer vertex_buf = wgpuDeviceCreateBuffer(device, &vertex_buf_desc);
+
+    wgpuQueueWriteBuffer(queue, vertex_buf, 0, vertex_data, vertex_buf_desc.size);
+
+    WGPUVertexAttribute position_attrib = WGPU_VERTEX_ATTRIBUTE_INIT;
+    position_attrib.shaderLocation = 0;
+    position_attrib.format = WGPUVertexFormat_Float32x2;
+    position_attrib.offset = 0;
+
+
+    WGPUVertexBufferLayout vertex_buf_layout = WGPU_VERTEX_BUFFER_LAYOUT_INIT;
+    vertex_buf_layout.attributeCount = 1;
+    vertex_buf_layout.attributes = &position_attrib;
+    vertex_buf_layout.arrayStride = 2 * sizeof(float);
+    vertex_buf_layout.stepMode = WGPUVertexStepMode_Vertex;
+
+
     WGPUShaderSourceWGSL wgsl_desc = WGPU_SHADER_SOURCE_WGSL_INIT;
     wgsl_desc.code = to_wgpu_string_view(shader_source);
 
@@ -247,6 +269,8 @@ int main(int argc, char **argv) {
     WGPURenderPipelineDescriptor pipeline_desc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
     pipeline_desc.vertex.module = shader_module;
     pipeline_desc.vertex.entryPoint = to_wgpu_string_view("vs_main");
+    pipeline_desc.vertex.bufferCount = 1;
+    pipeline_desc.vertex.buffers = &vertex_buf_layout;
 
 
     WGPUFragmentState fragment_state = WGPU_FRAGMENT_STATE_INIT;
@@ -264,7 +288,7 @@ int main(int argc, char **argv) {
     pipeline_desc.fragment = &fragment_state;
 
 
-    WGPURenderPipeline render_pipeline = wgpuDeviceCreateRenderPipeline(device, &pipeline_desc);
+    WGPURenderPipeline render_pipeline = wgpuDeviceCreateRenderPipeline(device, &pipeline_desc); 
 
 
     float red = 0.0;
@@ -277,8 +301,11 @@ int main(int argc, char **argv) {
         GLFWgamepadstate gamepad_state = {0};
 
         if (glfwGetGamepadState(GLFW_JOYSTICK_1, &gamepad_state)) {
-            red = gamepad_state.axes[0];
+            //red = gamepad_state.axes[0];
+            vertex_data[0] = gamepad_state.axes[0];
         }
+
+        wgpuQueueWriteBuffer(queue, vertex_buf, 0, vertex_data, vertex_buf_desc.size);
 
         glfwGetFramebufferSize(window, &width, &height);
 
@@ -331,7 +358,10 @@ int main(int argc, char **argv) {
         WGPURenderPassEncoder render_pass = wgpuCommandEncoderBeginRenderPass(render_encoder, &render_pass_desc);
 
         wgpuRenderPassEncoderSetPipeline(render_pass, render_pipeline);
-        wgpuRenderPassEncoderDraw(render_pass, 3, 1, 0, 0);
+
+        wgpuRenderPassEncoderSetVertexBuffer(render_pass, 0, vertex_buf, 0, wgpuBufferGetSize(vertex_buf));
+
+        wgpuRenderPassEncoderDraw(render_pass, vertex_count, 1, 0, 0);
 
         wgpuRenderPassEncoderEnd(render_pass);
         wgpuRenderPassEncoderRelease(render_pass);
@@ -350,6 +380,7 @@ int main(int argc, char **argv) {
         wgpuTextureRelease(surface_tex.texture);
     }
  
+    wgpuBufferRelease(vertex_buf);
 
     wgpuSurfaceUnconfigure(surface);
     wgpuSurfaceRelease(surface);
