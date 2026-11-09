@@ -20,6 +20,7 @@ gcc \
     -L ./glfw/lib/ \
     -lwgpu_native \
     -lglfw \
+    -lm \
     -Wl,-rpath,'$ORIGIN/wgpu/lib' \
     -Wl,-rpath,'$ORIGIN/glfw/lib'
 

@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
+#include <math.h>
 #include <webgpu/webgpu.h>
 #define GLFW_INCLUDE_NONE
 #define GLFW_EXPOSE_NATIVE_X11
@@ -231,11 +232,18 @@ int main(int argc, char **argv) {
     WGPUQueue queue = wgpuDeviceGetQueue(device);
 
 
+    const float vertex_data_init[] = {
+        -0.45f, 0.5f,
+        0.45f, 0.5f,
+        0.0f, -0.5f
+    };
+
     float vertex_data[] = {
         -0.45f, 0.5f,
         0.45f, 0.5f,
         0.0f, -0.5f
     };
+
     const size_t vertex_data_size = sizeof(vertex_data) / sizeof(float);
     const size_t vertex_count = vertex_data_size / 2;
 
@@ -294,6 +302,8 @@ int main(int argc, char **argv) {
     float red = 0.0;
     float step = 0.01;
     bool needs_reconfigure = false;
+    float rotangle = 0.0;
+    const float rotstep = 0.1;
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -301,8 +311,23 @@ int main(int argc, char **argv) {
         GLFWgamepadstate gamepad_state = {0};
 
         if (glfwGetGamepadState(GLFW_JOYSTICK_1, &gamepad_state)) {
-            //red = gamepad_state.axes[0];
-            vertex_data[0] = gamepad_state.axes[0];
+
+            if (fabs(gamepad_state.axes[3]) > 0.1) {
+                red = -gamepad_state.axes[3];
+            }
+
+            if (fabs(gamepad_state.axes[0]) > 0.1) {
+                rotangle -= gamepad_state.axes[0] * rotstep;
+            }
+        }
+
+        for (size_t i = 0; i < vertex_count; ++i) {
+            const size_t idx = i*2;
+            float x = vertex_data_init[idx];
+            float y = vertex_data_init[idx+1];
+
+            vertex_data[idx] = x*cosf(rotangle) - y*sinf(rotangle);
+            vertex_data[idx+1] = x*sinf(rotangle) + y*cosf(rotangle);
         }
 
         wgpuQueueWriteBuffer(queue, vertex_buf, 0, vertex_data, vertex_buf_desc.size);
