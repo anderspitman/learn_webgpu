@@ -11,6 +11,7 @@
 #define GLFW_EXPOSE_NATIVE_WAYLAND
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
+#include "gen_shader.h"
 
 
 #define CHECK(success) do { if (!(success)) { fprintf(stderr, "Failed on line %d\n", __LINE__); exit(1); } } while (0)
@@ -160,18 +161,6 @@ WGPUSurface create_surface(WGPUInstance instance, GLFWwindow *window) {
 }
 
 
-const char *shader_source =
-    "@vertex\n"
-    "fn vs_main(@location(0) in_vertex_position: vec2f) -> @builtin(position) vec4f {\n"
-    "    return vec4f(in_vertex_position, 0.0, 1.0);\n"
-    "}\n"
-    "@fragment\n"
-    "fn fs_main() -> @location(0) vec4f {\n"
-    "    return vec4f(0.0, 0.4, 0.7, 1.0);\n"
-    "}\n"
-    ;
-
-
 int main(int argc, char **argv) {
 
     int width = 0;
@@ -268,7 +257,7 @@ int main(int argc, char **argv) {
 
 
     WGPUShaderSourceWGSL wgsl_desc = WGPU_SHADER_SOURCE_WGSL_INIT;
-    wgsl_desc.code = to_wgpu_string_view(shader_source);
+    wgsl_desc.code = to_wgpu_string_view((const char*)gen_shader_source);
 
     WGPUShaderModuleDescriptor module_desc = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
     module_desc.nextInChain = &wgsl_desc.chain;
