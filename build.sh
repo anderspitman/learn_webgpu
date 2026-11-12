@@ -7,9 +7,9 @@ TARGET="${TARGET:-main}"
 
 echo Start build
 
-xxd -i -n gen_shader_source shader.wgsl > gen_shader.h
+${CC} -o gen_shader gen_shader.c && ./gen_shader shader.wgsl
 
-gcc \
+${CC} \
     -std=c99 \
     -Wall \
     -g \

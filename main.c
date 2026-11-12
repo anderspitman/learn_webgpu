@@ -257,7 +257,7 @@ int main(int argc, char **argv) {
 
 
     WGPUShaderSourceWGSL wgsl_desc = WGPU_SHADER_SOURCE_WGSL_INIT;
-    wgsl_desc.code = to_wgpu_string_view((const char*)gen_shader_source);
+    wgsl_desc.code = to_wgpu_string_view(GEN_SHADER_SOURCE);
 
     WGPUShaderModuleDescriptor module_desc = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
     module_desc.nextInChain = &wgsl_desc.chain;
