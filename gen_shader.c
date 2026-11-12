@@ -46,7 +46,9 @@ int main(int argc, char *argv[]) {
     if (argc < 2) {
         return 1;
     }
-    const char *shader_source = read_file(argv[1]);
+
+    const char *shader_path = argv[1];
+    const char *shader_source = read_file(shader_path);
 
     size_t len = strlen(shader_source);
 
@@ -55,12 +57,19 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    char *line = strtok((char *)shader_source, "\n");
+    const char *line_start = shader_source;
 
-    fprintf(out_file, "/* GEN_SHADER_SOURCE is the bytes from the following file:\n * ```\n");
-    while (line != NULL) {
-        fprintf(out_file, " * %s\n", line);
-        line = strtok(NULL, "\n");
+    fprintf(out_file, "/* GEN_SHADER_SOURCE is the bytes from the following file content:\n");
+    fprintf(out_file, " *\n * %s\n * ```\n", shader_path);
+    while (*line_start != '\0') {
+        const char *line_end = strchr(line_start, '\n');
+        if (line_end == NULL) {
+            fprintf(out_file, "%s\n", line_start);
+            break;
+        }
+        fprintf(out_file, " * %.*s\n", (int)(line_end - line_start), line_start);
+
+        line_start = line_end + 1;
     }
     fprintf(out_file, " * ```\n */\n");
 
