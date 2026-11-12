@@ -55,6 +55,15 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    char *line = strtok((char *)shader_source, "\n");
+
+    fprintf(out_file, "/* GEN_SHADER_SOURCE is the bytes from the following file:\n * ```\n");
+    while (line != NULL) {
+        fprintf(out_file, " * %s\n", line);
+        line = strtok(NULL, "\n");
+    }
+    fprintf(out_file, " * ```\n */\n");
+
     fprintf(out_file, "const char GEN_SHADER_SOURCE[] = {\n");
 
     for (size_t i = 0; i < len; ++i) {
